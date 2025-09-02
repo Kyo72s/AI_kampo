@@ -1,8 +1,10 @@
 # app_new.py
 # 変更点：
-# - 漢方解説から「漢方薬の事典の並び方」を非表示（DBに残っていても表示しない）
-# - 製品詳細の項目名「商品番号」を「一般的な製品番号」として表示（DBが新名ならそのまま、旧名でも新名に差し替え）
-# それ以外の動き（1回送信・幅広・提案/追加質問・詳細表示）は前版のままです。
+# - 無料トライアル期間を 7 日に変更
+# - 「AIによる処方提案（上位5件）」の下に小さい説明「漢方名をクリックで解説を表示」
+# - 「保険収載漢方エキス製剤一覧」の下に小さい説明「製剤名をクリックで添付文書情報を表示」
+# - ページ全体の背景色を #D7FFB6 に変更
+# 既存仕様（1回送信・幅広・提案/追加質問・詳細表示・症状欄は非表示・製品一覧はボタン形式）はそのまま。
 
 import os, re, unicodedata, datetime as dt
 import pandas as pd
@@ -23,7 +25,7 @@ st.set_page_config(page_title=APP_TITLE, page_icon="💊", layout="wide")
 
 CUSTOM_CSS = """
 <style>
-:root { --bg:#f8fafc; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
+:root { --bg:#D7FFB6; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
 .block-container { max-width: 1740px !important; }  /* 幅広 1.5倍 */
 html, body, .stApp { background: var(--bg); color: var(--ink); }
 .small { color: var(--muted); font-size: 12px; }
@@ -136,7 +138,7 @@ main_norm_sets, _                   = build_sets_both(main_map_raw, ("主症状"
 def init_state():
     st.session_state.setdefault("plan", "Lite")
     st.session_state.setdefault("created_at", dt.date.today())
-    st.session_state.setdefault("trial_days", 14)
+    st.session_state.setdefault("trial_days", 7)  # ← 7日に変更
     st.session_state.setdefault("main_text", "")
     st.session_state.setdefault("sub_text", "")
     st.session_state.setdefault("candidates", [])
@@ -268,6 +270,7 @@ def render_kampo_detail(kampo_name: str):
     if set(["略称","商品名"]).issubset(product_master.columns):
         pm = product_master[product_master["略称"].astype(str)==kampo_name]
         st.markdown("### 保険収載漢方エキス製剤一覧")
+        st.markdown("<div class='small'>製剤名をクリックで添付文書情報を表示</div>", unsafe_allow_html=True)
         if pm.empty:
             st.info("該当製品は登録されていません。")
         else:
@@ -305,7 +308,7 @@ with center:
     with h2:
         st.selectbox("プラン", PLANS, key="plan")
         created = st.session_state.setdefault("created_at", dt.date.today())
-        trial   = st.session_state.setdefault("trial_days", 14)
+        trial   = st.session_state.setdefault("trial_days", 7)  # ← 7日に変更
         remain_days = (dt.date.today() - created).days
         days_left   = max(0, trial - remain_days)
         st.caption(f"無料トライアル残り：{days_left}日")
@@ -346,6 +349,7 @@ with center:
     if cands:
         with st.container():
             st.markdown("### AIによる処方提案（上位5件）")
+            st.markdown("<div class='small'>漢方名をクリックで解説を表示</div>", unsafe_allow_html=True)
             top_score = max(c["score"] for c in cands) if cands else 1
             for i, c in enumerate(cands[:TOP_N], start=1):
                 pct = int(round(95 * c["score"] / top_score)) if top_score>0 else 0
