@@ -3,7 +3,6 @@
 # - 無料トライアル期間を 7 日に変更
 # - 「AIによる処方提案（上位5件）」の下に小さい説明「漢方名をクリックで解説を表示」
 # - 「保険収載漢方エキス製剤一覧」の下に小さい説明「製剤名をクリックで添付文書情報を表示」
-# - ページ全体の背景色を #D7FFB6 に変更
 # 既存仕様（1回送信・幅広・提案/追加質問・詳細表示・症状欄は非表示・製品一覧はボタン形式）はそのまま。
 
 import os, re, unicodedata, datetime as dt
@@ -25,7 +24,7 @@ st.set_page_config(page_title=APP_TITLE, page_icon="💊", layout="wide")
 
 CUSTOM_CSS = """
 <style>
-:root { --bg:#D7FFB6; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
+:root { --bg:#f5fffa; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
 .block-container { max-width: 1740px !important; }  /* 幅広 1.5倍 */
 html, body, .stApp { background: var(--bg); color: var(--ink); }
 .small { color: var(--muted); font-size: 12px; }
