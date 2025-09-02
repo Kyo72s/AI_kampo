@@ -3,6 +3,7 @@
 # - 無料トライアル期間を 7 日に変更
 # - 「AIによる処方提案（上位5件）」の下に小さい説明「漢方名をクリックで解説を表示」
 # - 「保険収載漢方エキス製剤一覧」の下に小さい説明「製剤名をクリックで添付文書情報を表示」
+# - ページ全体の背景色を #D7FFB6 に変更
 # 既存仕様（1回送信・幅広・提案/追加質問・詳細表示・症状欄は非表示・製品一覧はボタン形式）はそのまま。
 
 import os, re, unicodedata, datetime as dt
@@ -10,7 +11,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-APP_TITLE = "AI漢方選人"
+APP_TITLE = "AI漢方選人 byくすリサーチ"
 TOP_N = 5
 PCT_GAP_THRESHOLD = 0.30      # 1位との差が30%未満 → 追加質問対象
 FOLLOWUP_PAGE_SIZE = 3        # 追加質問：各候補1ページあたり件数
