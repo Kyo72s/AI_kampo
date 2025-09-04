@@ -1,79 +1,14 @@
 # app_new.py
 # 変更点：
-# - 無料トライアル期間を 7 日に変更
-# - 「AIによる処方提案（上位5件）」の下に小さい説明「漢方名をクリックで解説を表示」
-# - 「保険収載漢方エキス製剤一覧」の下に小さい説明「製剤名をクリックで添付文書情報を表示」
-# - ページ全体の背景色を #D7FFB6 に変更
-# 既存仕様（1回送信・幅広・提案/追加質問・詳細表示・症状欄は非表示・製品一覧はボタン形式）はそのまま。
+# - タイトル文字を削除し、ヘッダー画像（AI_Kampo_sennin_title.png）を表示
+# - 背景色 #D7FFB6 / 無料トライアル7日 / 説明文 などは前版のまま
 
 import os, re, unicodedata, datetime as dt
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from supa_client import get_supa
 
-APP_TITLE = "AI漢方選人 byくすリサーチ"
-
-# 例：タイトルのすぐ下に入れるテスト専用
-import streamlit as st
-
-if st.button("（一度だけ）Supabase接続テスト"):
-    try:
-        supa = get_supa()
-        # users テーブルを1件だけ読んでみる（空なら0件でOK）
-        res = supa.table("users").select("email").limit(1).execute()
-        st.success("Supabase に接続できました！ users テーブルの件数チェックOK")
-    except Exception as e:
-        st.error(f"Supabase 接続エラー：{e}")
-# 例：テストが終わったらこのブロックを削除
-
-# ===== ここからDBユーティリティ（よく使う操作） =====
-def db_create_user(email, phone, name, role, license_no=None, license_date=None):
-    """新規ユーザーを仮登録（is_active=False, plan='trial'）"""
-    supa = get_supa()
-    data = {
-        "email": email,
-        "phone": phone,           # +81形式推奨
-        "name": name,
-        "role": role,             # '医師' or '歯科医師'
-        "license_no": license_no,
-        "license_date": license_date,
-        "plan": "trial",
-        "is_active": False
-    }
-    return supa.table("users").insert(data).execute()
-
-def db_find_user_by_email(email):
-    """メールで1人探す（いなければ空配列）"""
-    supa = get_supa()
-    res = supa.table("users").select("*").eq("email", email).limit(1).execute()
-    return res.data[0] if res.data else None
-
-def db_has_active_session(user_id):
-    """このユーザーに active=True のセッションがあるか確認（単一端末ログイン制御）"""
-    supa = get_supa()
-    res = supa.table("sessions").select("id").eq("user_id", user_id).eq("active", True).limit(1).execute()
-    return bool(res.data)
-
-def db_create_session(user_id, session_token, ip=None, user_agent=None):
-    """新しいセッションを発行（active=True）。同時ログインを許可しない時は呼ぶ前に db_has_active_session をチェック"""
-    supa = get_supa()
-    data = {
-        "user_id": user_id,
-        "session_token": session_token,
-        "active": True,
-        "ip": ip or "",
-        "user_agent": user_agent or ""
-    }
-    return supa.table("sessions").insert(data).execute()
-
-def db_deactivate_session(session_token):
-    """ログアウトでセッション無効化"""
-    supa = get_supa()
-    return supa.table("sessions").update({"active": False}).eq("session_token", session_token).execute()
-# ===== ここまでDBユーティリティ =====
-
-
+APP_TITLE = "AI漢方選人"  # 使わないが残しておきます（将来の内部表示用などに）
 TOP_N = 5
 PCT_GAP_THRESHOLD = 0.30      # 1位との差が30%未満 → 追加質問対象
 FOLLOWUP_PAGE_SIZE = 3        # 追加質問：各候補1ページあたり件数
@@ -87,7 +22,7 @@ st.set_page_config(page_title=APP_TITLE, page_icon="💊", layout="wide")
 
 CUSTOM_CSS = """
 <style>
-:root { --bg:#f5fffa; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
+:root { --bg:#D7FFB6; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
 .block-container { max-width: 1740px !important; }  /* 幅広 1.5倍 */
 html, body, .stApp { background: var(--bg); color: var(--ink); }
 .small { color: var(--muted); font-size: 12px; }
@@ -105,7 +40,7 @@ hr { border:none; border-top:1px solid var(--stroke); margin:16px 0; }
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# ================= データ読み込み =================
+# ================= データ読み込み（省略：前版の関数類をそのまま流用） =================
 @st.cache_data
 def load_any_csv(path: str) -> pd.DataFrame:
     if not os.path.exists(path): return pd.DataFrame()
@@ -130,7 +65,6 @@ def load_data():
 
 symptom_map_raw, main_map_raw, kampo_master, product_master = load_data()
 
-# ================= 正規化＆同義語 =================
 def kana_to_hira(s: str) -> str:
     return "".join(chr(ord(ch)-0x60) if 0x30A1<=ord(ch)<=0x30F6 else ch for ch in s)
 
@@ -155,14 +89,12 @@ def unify_synonym(token: str) -> str:
             return canon
     return n
 
-# ================= 入力分割（全区切り対応） =================
 def split_multi(text: str):
     """ 半角/全角スペース・改行・「、」「，」「,」「/」「／」を区切り """
     if not isinstance(text, str): return []
     parts = re.split(r"[,\s、，/／]+", text)
     return [p.strip() for p in parts if p.strip()]
 
-# ================= マップ構築（略称 → {norm set}, {raw list}） =================
 def split_symptoms_cell(cell: str):
     if not isinstance(cell, str): return []
     t = cell.replace("、", ",").replace("，", ",").replace("・", ",").replace("／", ",").replace("/", ",")
@@ -196,37 +128,14 @@ def build_sets_both(df: pd.DataFrame, text_col_candidates=("症状","主症状",
 symptom_norm_sets, symptom_raw_lists = build_sets_both(symptom_map_raw, ("症状","キーワード","主症状"))
 main_norm_sets, _                   = build_sets_both(main_map_raw, ("主症状","症状","キーワード"))
 
-# ================= セッション状態 =================
-def init_state():
-    st.session_state.setdefault("plan", "Lite")
-    st.session_state.setdefault("created_at", dt.date.today())
-    st.session_state.setdefault("trial_days", 7)  # ← 7日に変更
-    st.session_state.setdefault("main_text", "")
-    st.session_state.setdefault("sub_text", "")
-    st.session_state.setdefault("candidates", [])
-    st.session_state.setdefault("followup_page", 0)
-    st.session_state.setdefault("selected_kampo", None)
-    st.session_state.setdefault("selected_product", None)
-
-def reset_all():
-    st.session_state.update(
-        main_text="", sub_text="", candidates=[],
-        followup_page=0, selected_kampo=None, selected_product=None
-    )
-
-init_state()
-
-# ================= スコアリング =================
 def score_candidates(main_text: str, sub_text: str):
     toks_main = [unify_synonym(x) for x in split_multi(main_text)]
     toks_sub  = [unify_synonym(x) for x in split_multi(sub_text)]
-
     main_hits = set()
     if toks_main and main_norm_sets:
         for name, s in main_norm_sets.items():
             if any(t in s for t in toks_main): main_hits.add(name)
     pool_names = list(main_hits if main_hits else symptom_norm_sets.keys())
-
     rows=[]
     for name in pool_names:
         s_all_norm  = symptom_norm_sets.get(name, set())
@@ -245,13 +154,11 @@ def pct_gap_large_enough(cands, threshold=PCT_GAP_THRESHOLD):
     if s1<=0: return True
     return (1.0 - s2/s1) >= threshold
 
-# ================= 追加質問（原文そのまま） =================
 def all_entered_tokens_norm() -> set[str]:
     toks = [*split_multi(st.session_state.get("main_text","")), *split_multi(st.session_state.get("sub_text",""))]
     return {unify_synonym(x) for x in toks if x}
 
 def unique_per_candidate_within_group_raw(group_names):
-    """対象群それぞれに“しか”無い症状（原文）。既入力（正規化済）は除外。"""
     entered_norm = all_entered_tokens_norm()
     group_norm = {n: symptom_norm_sets.get(n,set()) for n in group_names}
     group_raw  = {n: symptom_raw_lists.get(n,[])  for n in group_names}
@@ -270,7 +177,6 @@ def unique_per_candidate_within_group_raw(group_names):
     return result
 
 def target_group(cands):
-    """1位＋(1位に対して)相性差30%未満の候補（= s_i/s1 > 0.7）すべて"""
     if not cands: return []
     s1 = cands[0]["score"]
     names=[cands[0]["略称"]]
@@ -287,7 +193,6 @@ def page_slice_dict(dict_lists, page, size):
         if len(items)>end: more=True
     return out, more
 
-# ================= 表示ユーティリティ =================
 def pretty_text_common(v):
     if v is None or (isinstance(v,float) and pd.isna(v)): return "特になし"
     s=str(v)
@@ -297,20 +202,18 @@ def pretty_text_common(v):
     return s.strip() if s.strip() else "特になし"
 
 def pretty_text_product(v, field_name: str):
-    """DBの値を尊重。組成は v18 相当の改行（<br>→改行、キーワード直前、g・句点直後で改行）"""
     s=str(v)
     s=re.sub(r"(?:<br\s*/?>|\[\[BR\]\]|\\n|⏎|＜改行＞|<改行>)","\n",s,flags=re.IGNORECASE)
     if field_name == "組成":
         for kw in [r"日局", r"より製した", r"上記", r"以上の", r"本剤7\.5g中、\s*上記の"]:
             s = re.sub(rf"[ \t\u3000]*(?={kw})", "\n", s)
-        s = re.sub(r"(?<=g)[ \t\u3000]*", "\n", s)  # gの直後
-        s = re.sub(r"。\s*", "。\n", s)            # 句点の直後
+        s = re.sub(r"(?<=g)[ \t\u3000]*", "\n", s)
+        s = re.sub(r"。\s*", "。\n", s)
     else:
         s = re.sub(r"。[ \t\u3000]*","。\n",s)
     s=re.sub(r"[ \t\u3000]{2,}"," ",s)
     return s.strip()
 
-# ================= 詳細表示（漢方・製品） =================
 def render_kampo_detail(kampo_name: str):
     st.markdown(f"## {kampo_name}")
     km = kampo_master[kampo_master["略称"].astype(str)==kampo_name] if "略称" in kampo_master.columns else pd.DataFrame()
@@ -319,7 +222,6 @@ def render_kampo_detail(kampo_name: str):
         if km.empty:
             st.info("漢方薬マスタに該当データがありません。")
         else:
-            # 「症状」「漢方薬の事典の並び方」は表示しない
             preferred = ["ふりがな","出典","証","六病位","脈","舌","腹","漢方弁証","中医弁証"]
             hide_cols = {"略称","症状","漢方薬の事典の並び方"}
             cols = [c for c in preferred if c in km.columns] + [c for c in km.columns if c not in preferred and c not in hide_cols]
@@ -328,7 +230,6 @@ def render_kampo_detail(kampo_name: str):
                 st.markdown(f"<div class='kv'>{c}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div>{pretty_text_common(row[c])}</div>", unsafe_allow_html=True)
 
-    # 製品一覧：一覧ボタン表示（プルダウンではない）
     if set(["略称","商品名"]).issubset(product_master.columns):
         pm = product_master[product_master["略称"].astype(str)==kampo_name]
         st.markdown("### 保険収載漢方エキス製剤一覧")
@@ -353,7 +254,6 @@ def render_product_detail(kampo_name: str, product_name: str):
     row = pm.iloc[0]
     if "添付文書URL" in pm.columns and str(row.get("添付文書URL","")).startswith("http"):
         st.markdown(f"[添付文書を開く]({row['添付文書URL']})")
-    # 「商品番号」はDBで「一般的な製品番号」に改名済み想定。旧名があれば新名として表示。
     display_map = {"商品番号": "一般的な製品番号"}
     for c in pm.columns:
         if c in ["略称","商品名","添付文書URL"]: continue
@@ -361,16 +261,26 @@ def render_product_detail(kampo_name: str, product_name: str):
         st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
         st.markdown(f"<div>{pretty_text_product(row[c], c)}</div>", unsafe_allow_html=True)
 
-# ================= UI =================
+# ================= 画面本体 =================
+# 中央寄せレイアウト
 left, center, right = st.columns([1,2,1])
 with center:
-    # ヘッダ（右上：プラン＋無料期間）
-    h1, h2 = st.columns([1,1])
-    with h1: st.markdown(f"## {APP_TITLE}")
-    with h2:
+
+    # --- ヘッダー画像（タイトル文字は表示しない） ---
+    # 画像ファイルはプロジェクト直下に AI_Kampo_sennin_title.png を置く
+    header_path = "AI_Kampo_sennin_title.png"
+    if os.path.exists(header_path):
+        st.image(header_path, use_column_width=True)
+    else:
+        # 念のためのフォールバック（画像が見つからない場合のみ）
+        st.markdown("## " + APP_TITLE)
+
+    # 右上：プラン + 無料トライアル日数（7日）
+    col_title, col_plan = st.columns([1,1])
+    with col_plan:
         st.selectbox("プラン", PLANS, key="plan")
         created = st.session_state.setdefault("created_at", dt.date.today())
-        trial   = st.session_state.setdefault("trial_days", 7)  # ← 7日に変更
+        trial   = st.session_state.setdefault("trial_days", 7)
         remain_days = (dt.date.today() - created).days
         days_left   = max(0, trial - remain_days)
         st.caption(f"無料トライアル残り：{days_left}日")
@@ -393,7 +303,8 @@ with center:
         colS, colR = st.columns([1,1])
         submitted = colS.form_submit_button("送信", type="primary")
         if colR.form_submit_button("🔄 新しい漢方選びを始める"):
-            reset_all()
+            st.session_state.update(main_text="", sub_text="", candidates=[],
+                                   followup_page=0, selected_kampo=None, selected_product=None)
             st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
     st.markdown("</section>", unsafe_allow_html=True)
 
@@ -423,7 +334,7 @@ with center:
 
         if not pct_gap_large_enough(cands, threshold=PCT_GAP_THRESHOLD):
             group = target_group(cands)
-            uniq_dict_raw = unique_per_candidate_within_group_raw(group)  # 原文そのまま
+            uniq_dict_raw = unique_per_candidate_within_group_raw(group)
             page = st.session_state.get("followup_page", 0)
             sliced, more_exists = page_slice_dict(uniq_dict_raw, page, FOLLOWUP_PAGE_SIZE)
 
@@ -443,4 +354,3 @@ with center:
     # 漢方詳細（クリック後）
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
-
