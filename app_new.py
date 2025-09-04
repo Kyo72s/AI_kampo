@@ -10,8 +10,70 @@ import os, re, unicodedata, datetime as dt
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+from supa_client import get_supa
 
 APP_TITLE = "AI漢方選人 byくすリサーチ"
+
+# 例：タイトルのすぐ下に入れるテスト専用
+import streamlit as st
+
+if st.button("（一度だけ）Supabase接続テスト"):
+    try:
+        supa = get_supa()
+        # users テーブルを1件だけ読んでみる（空なら0件でOK）
+        res = supa.table("users").select("email").limit(1).execute()
+        st.success("Supabase に接続できました！ users テーブルの件数チェックOK")
+    except Exception as e:
+        st.error(f"Supabase 接続エラー：{e}")
+# 例：テストが終わったらこのブロックを削除
+
+# ===== ここからDBユーティリティ（よく使う操作） =====
+def db_create_user(email, phone, name, role, license_no=None, license_date=None):
+    """新規ユーザーを仮登録（is_active=False, plan='trial'）"""
+    supa = get_supa()
+    data = {
+        "email": email,
+        "phone": phone,           # +81形式推奨
+        "name": name,
+        "role": role,             # '医師' or '歯科医師'
+        "license_no": license_no,
+        "license_date": license_date,
+        "plan": "trial",
+        "is_active": False
+    }
+    return supa.table("users").insert(data).execute()
+
+def db_find_user_by_email(email):
+    """メールで1人探す（いなければ空配列）"""
+    supa = get_supa()
+    res = supa.table("users").select("*").eq("email", email).limit(1).execute()
+    return res.data[0] if res.data else None
+
+def db_has_active_session(user_id):
+    """このユーザーに active=True のセッションがあるか確認（単一端末ログイン制御）"""
+    supa = get_supa()
+    res = supa.table("sessions").select("id").eq("user_id", user_id).eq("active", True).limit(1).execute()
+    return bool(res.data)
+
+def db_create_session(user_id, session_token, ip=None, user_agent=None):
+    """新しいセッションを発行（active=True）。同時ログインを許可しない時は呼ぶ前に db_has_active_session をチェック"""
+    supa = get_supa()
+    data = {
+        "user_id": user_id,
+        "session_token": session_token,
+        "active": True,
+        "ip": ip or "",
+        "user_agent": user_agent or ""
+    }
+    return supa.table("sessions").insert(data).execute()
+
+def db_deactivate_session(session_token):
+    """ログアウトでセッション無効化"""
+    supa = get_supa()
+    return supa.table("sessions").update({"active": False}).eq("session_token", session_token).execute()
+# ===== ここまでDBユーティリティ =====
+
+
 TOP_N = 5
 PCT_GAP_THRESHOLD = 0.30      # 1位との差が30%未満 → 追加質問対象
 FOLLOWUP_PAGE_SIZE = 3        # 追加質問：各候補1ページあたり件数
@@ -381,3 +443,4 @@ with center:
     # 漢方詳細（クリック後）
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
