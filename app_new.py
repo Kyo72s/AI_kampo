@@ -1,14 +1,15 @@
 # app_new.py
-# 変更点：
-# - タイトル文字を削除し、ヘッダー画像（AI_Kampo_sennin_title.png）を表示
-# - 背景色 #D7FFB6 / 無料トライアル7日 / 説明文 などは前版のまま
+# 修正点：
+# - st.image を use_container_width=True に変更（赤い注意を解消）
+# - 背景色を #D7FFB6 に統一（ページ全体に強制適用）
+# - フォーム送信時の st.rerun() を削除して、送信後の二重リロードを防止
 
 import os, re, unicodedata, datetime as dt
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-APP_TITLE = "AI漢方選人"  # 使わないが残しておきます（将来の内部表示用などに）
+APP_TITLE = "AI漢方選人"
 TOP_N = 5
 PCT_GAP_THRESHOLD = 0.30      # 1位との差が30%未満 → 追加質問対象
 FOLLOWUP_PAGE_SIZE = 3        # 追加質問：各候補1ページあたり件数
@@ -16,16 +17,23 @@ W_MAIN = 2                    # 主症状重み
 W_SUB  = 1                    # 他症状重み
 PLANS  = ["Lite", "Standard", "Premium"]
 
-# ================= 初期セットアップ =================
+# ============== 初期セットアップ ==============
 load_dotenv()
 st.set_page_config(page_title=APP_TITLE, page_icon="💊", layout="wide")
 
 CUSTOM_CSS = """
 <style>
-:root { --bg:#D7FFB6; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
-.block-container { max-width: 1740px !important; }  /* 幅広 1.5倍 */
-html, body, .stApp { background: var(--bg); color: var(--ink); }
+/* 背景を #D7FFB6 に統一（全レイヤーに強制） */
+html, body, .stApp { background: #D7FFB6 !important; }
+[data-testid="stAppViewContainer"] { background: #D7FFB6 !important; }
+[data-testid="stHeader"] { background: transparent !important; }
+
+/* 幅広（1.5倍） */
+.block-container { max-width: 1740px !important; }
+
+:root { --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
 .small { color: var(--muted); font-size: 12px; }
+
 section.card {
   background:var(--card); border:1px solid var(--stroke); border-radius:16px;
   padding:18px 20px; margin: 12px auto; box-shadow: 0 2px 10px rgba(0,0,0,0.04);
@@ -40,7 +48,7 @@ hr { border:none; border-top:1px solid var(--stroke); margin:16px 0; }
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# ================= データ読み込み（省略：前版の関数類をそのまま流用） =================
+# ============== CSV 読み込みユーティリティ ==============
 @st.cache_data
 def load_any_csv(path: str) -> pd.DataFrame:
     if not os.path.exists(path): return pd.DataFrame()
@@ -65,6 +73,7 @@ def load_data():
 
 symptom_map_raw, main_map_raw, kampo_master, product_master = load_data()
 
+# ============== 正規化＆分割ユーティリティ ==============
 def kana_to_hira(s: str) -> str:
     return "".join(chr(ord(ch)-0x60) if 0x30A1<=ord(ch)<=0x30F6 else ch for ch in s)
 
@@ -128,6 +137,7 @@ def build_sets_both(df: pd.DataFrame, text_col_candidates=("症状","主症状",
 symptom_norm_sets, symptom_raw_lists = build_sets_both(symptom_map_raw, ("症状","キーワード","主症状"))
 main_norm_sets, _                   = build_sets_both(main_map_raw, ("主症状","症状","キーワード"))
 
+# ============== マッチング & 追加質問 ==============
 def score_candidates(main_text: str, sub_text: str):
     toks_main = [unify_synonym(x) for x in split_multi(main_text)]
     toks_sub  = [unify_synonym(x) for x in split_multi(sub_text)]
@@ -261,31 +271,28 @@ def render_product_detail(kampo_name: str, product_name: str):
         st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
         st.markdown(f"<div>{pretty_text_product(row[c], c)}</div>", unsafe_allow_html=True)
 
-# ================= 画面本体 =================
-# 中央寄せレイアウト
+# ============== 画面本体 ==============
 left, center, right = st.columns([1,2,1])
 with center:
 
-    # --- ヘッダー画像（タイトル文字は表示しない） ---
-    # 画像ファイルはプロジェクト直下に AI_Kampo_sennin_title.png を置く
-    header_path = "AI_Kampo_sennin_title.png"
+    # ヘッダー画像（タイトル文字は表示しない）
+    header_path = "AI_Kampo_sennin_title.png"  # プロジェクト直下に配置
     if os.path.exists(header_path):
-        st.image(header_path, use_column_width=True)
+        st.image(header_path, use_container_width=True)
     else:
-        # 念のためのフォールバック（画像が見つからない場合のみ）
-        st.markdown("## " + APP_TITLE)
+        st.markdown("## " + APP_TITLE)  # フォールバック（画像がない場合のみ）
 
-    # 右上：プラン + 無料トライアル日数（7日）
+    # 右上：プラン + 無料トライアル（7日）
     col_title, col_plan = st.columns([1,1])
     with col_plan:
         st.selectbox("プラン", PLANS, key="plan")
         created = st.session_state.setdefault("created_at", dt.date.today())
-        trial   = st.session_state.setdefault("trial_days", 7)
+        trial   = st.session_state.setdefault("trial_days", 7)  # 7日に固定
         remain_days = (dt.date.today() - created).days
         days_left   = max(0, trial - remain_days)
         st.caption(f"無料トライアル残り：{days_left}日")
 
-    # ===== 入力カード（form：1回で確実に送信→rerun）=====
+    # 入力カード（form：1回送信でリロード1回のみに）
     st.markdown("<section class='card'>", unsafe_allow_html=True)
     with st.form(key="symptom_form", clear_on_submit=False):
         st.subheader("主症状")
@@ -305,9 +312,11 @@ with center:
         if colR.form_submit_button("🔄 新しい漢方選びを始める"):
             st.session_state.update(main_text="", sub_text="", candidates=[],
                                    followup_page=0, selected_kampo=None, selected_product=None)
+            # リセットは rerun して良い（操作の明確さ重視）
             st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
     st.markdown("</section>", unsafe_allow_html=True)
 
+    # 送信処理：フォーム自体が1回リロードするので、ここでは rerun しない
     if submitted:
         st.session_state["main_text"]  = main_input
         st.session_state["sub_text"]   = sub_input
@@ -315,7 +324,7 @@ with center:
         st.session_state["followup_page"] = 0
         st.session_state["selected_kampo"]  = None
         st.session_state["selected_product"]= None
-        st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
+        # ★ rerun しない：二重実行の原因になるため
 
     # 候補表示
     cands = st.session_state.get("candidates", [])
@@ -330,7 +339,8 @@ with center:
                 if st.button(f"【{i}位】{c['略称']}（相性 {pct}%）", key=f"cand_{i}", use_container_width=True):
                     st.session_state["selected_kampo"]  = c["略称"]
                     st.session_state["selected_product"]= None
-                    st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
+                    # ここは押した瞬間に詳細へ移るため rerun 維持
+                    st.rerun() if hasattr(st, "rerun") else st.experimental_rerun()
 
         if not pct_gap_large_enough(cands, threshold=PCT_GAP_THRESHOLD):
             group = target_group(cands)
@@ -349,7 +359,7 @@ with center:
                 more_exists = True
             if more_exists and st.button("さらに症状を提案する"):
                 st.session_state["followup_page"] = page + 1
-                st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
+                st.rerun() if hasattr(st, "rerun") else st.experimental_rerun()
 
     # 漢方詳細（クリック後）
     if st.session_state.get("selected_kampo"):
