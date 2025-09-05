@@ -1,8 +1,9 @@
 # app_new.py
-# 変更点（今回）：
-# - 入力欄で value 指定を廃止し、st.session_state で初期化＆保持（追記が消える問題を解消）
-# - 送信時は session_state の現在値を使ってスコア算出（1回の送信で反映）
-# - 背景色 #ecf7da / 二重リロード対策 / 製剤クリックの詳細表示は前版のまま
+# 修正点：
+# - 初回送信でも即結果表示（送信直後はローカル変数で表示。rerun不要）
+# - リセットは「フラグ→rerun→最初にまとめて初期化」で安全に（Widget後のstate変更エラー解消）
+# - 入力欄は session_state で初期化し、keyのみで管理（追記が消えない）
+# - 背景 #ecf7da / 製剤詳細表示 は従来どおり
 
 import os, re, unicodedata, datetime as dt
 import pandas as pd
@@ -27,10 +28,8 @@ html, body, .stApp { background: #ecf7da !important; }
 [data-testid="stAppViewContainer"] { background: #ecf7da !important; }
 [data-testid="stHeader"] { background: transparent !important; }
 .block-container { max-width: 1740px !important; }
-
 :root { --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
 .small { color: var(--muted); font-size: 12px; }
-
 section.card {
   background:var(--card); border:1px solid var(--stroke); border-radius:16px;
   padding:18px 20px; margin: 12px auto; box-shadow: 0 2px 10px rgba(0,0,0,0.04);
@@ -270,13 +269,21 @@ def render_kampo_detail(kampo_name: str):
 # ============== 画面本体 ==============
 left, center, right = st.columns([1,2,1])
 with center:
+    # 1) リセットフラグを先頭で処理（Widget生成前にstateを初期化）
+    if st.session_state.get("_do_reset"):
+        for k in ["form_main","form_sub","main_text","sub_text","candidates",
+                  "followup_page","selected_kampo","selected_product"]:
+            st.session_state.pop(k, None)
+        st.session_state["_do_reset"] = False  # フラグ解除
+
+    # 2) ヘッダー画像
     header_path = "AI_Kampo_sennin_title.png"
     if os.path.exists(header_path):
         st.image(header_path, use_container_width=True)
     else:
         st.markdown("## " + APP_TITLE)
 
-    # 右上：プラン + 無料トライアル（7日）
+    # 3) 右上のプラン＋無料トライアル（7日）
     col_title, col_plan = st.columns([1,1])
     with col_plan:
         st.selectbox("プラン", PLANS, key="plan")
@@ -286,57 +293,48 @@ with center:
         days_left   = max(0, trial - remain_days)
         st.caption(f"無料トライアル残り：{days_left}日")
 
-    # ===== 入力カード（通常入力＋ボタン／valueは使わない）=====
-    # 1回だけ初期化（既に入っていれば触らない）
+    # 4) 入力欄（初期化は最初の1回のみ）
     if "form_main" not in st.session_state:
-        st.session_state["form_main"] = st.session_state.get("main_text", "")
+        st.session_state["form_main"] = st.session_state.get("main_text","")
     if "form_sub" not in st.session_state:
-        st.session_state["form_sub"]  = st.session_state.get("sub_text", "")
+        st.session_state["form_sub"]  = st.session_state.get("sub_text","")
 
     st.markdown("<section class='card'>", unsafe_allow_html=True)
 
     st.subheader("主症状")
     st.caption("最も気になる症状を1〜2語で入力してください（例：吐き気、頭痛）")
-    st.text_input(
-        "主症状入力",
-        key="form_main",
-        placeholder="例：吐き気 頭痛",
-        label_visibility="collapsed",
-    )
+    st.text_input("主症状入力", key="form_main",
+                  placeholder="例：吐き気 頭痛", label_visibility="collapsed")
 
     st.subheader("他に気になる症状")
     st.caption("他に気になる症状・体質を自由に入力してください（例：めまい だるい 口渇 など）")
-    st.text_area(
-        "他症状入力",
-        key="form_sub",
-        height=90,
-        placeholder="例：めまい だるい 口渇 など",
-        label_visibility="collapsed",
-    )
+    st.text_area("他症状入力", key="form_sub", height=90,
+                 placeholder="例：めまい だるい 口渇 など", label_visibility="collapsed")
 
     colS, colR = st.columns([1,1])
     submit_clicked = colS.button("送信", type="primary")
     if colR.button("🔄 新しい漢方選びを始める"):
-        st.session_state.update(main_text="", sub_text="", candidates=[],
-                               followup_page=0, selected_kampo=None, selected_product=None,
-                               form_main="", form_sub="")
+        st.session_state["_do_reset"] = True   # 先頭で初期化させる
         st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
 
     st.markdown("</section>", unsafe_allow_html=True)
 
-    # 送信処理：session_state の現在値をそのまま利用（rerunしない）
+    # 5) 送信処理（初回から即表示 / rerun不要）
+    #    → 送信直後の候補は new_cands でそのまま表示に使う
+    new_cands = None
     if submit_clicked:
         main_input = st.session_state.get("form_main","")
         sub_input  = st.session_state.get("form_sub","")
         st.session_state["main_text"]  = main_input
         st.session_state["sub_text"]   = sub_input
-        st.session_state["candidates"] = score_candidates(main_input, sub_input)
+        new_cands = score_candidates(main_input, sub_input)
+        st.session_state["candidates"] = new_cands
         st.session_state["followup_page"] = 0
         st.session_state["selected_kampo"]  = None
         st.session_state["selected_product"]= None
 
-    # 候補表示
-    cands = st.session_state.get("candidates", [])
+    # 6) 候補表示（送信直後は new_cands を優先して即時表示）
+    cands = new_cands if new_cands is not None else st.session_state.get("candidates", [])
     if cands:
         with st.container():
             st.markdown("### AIによる処方提案（上位5件）")
@@ -366,8 +364,7 @@ with center:
                 more_exists = True
             if more_exists and st.button("さらに症状を提案する"):
                 st.session_state["followup_page"] = page + 1
-                # rerun不要：自動再描画で次ページが表示される
 
-    # 漢方詳細
+    # 7) 漢方詳細
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
