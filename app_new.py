@@ -1,9 +1,8 @@
 # app_new.py
-# 変更点：
-# - 背景色を #ecf7da に統一
-# - 送信ボタン押下時の二重リロードを解消（フォーム→通常入力+ボタンへ）
-# - タイトル文字の代わりにヘッダー画像を use_container_width=True で表示
-# - それ以外の挙動や文言は従来どおり
+# 修正点：
+# - 背景色 #ecf7da
+# - 送信/候補クリック/製剤クリックで明示rerunを使わず、二度薄くなる現象を防止
+# - 製品詳細が出ない(NameError)対処：render_product_detailを先に定義
 
 import os, re, unicodedata, datetime as dt
 import pandas as pd
@@ -226,6 +225,24 @@ def pretty_text_product(v, field_name: str):
     s=re.sub(r"[ \t\u3000]{2,}"," ",s)
     return s.strip()
 
+# ===== 先に定義：製品詳細 =====
+def render_product_detail(kampo_name: str, product_name: str):
+    pm = product_master
+    pm = pm[(pm["略称"].astype(str)==kampo_name) & (pm["商品名"].astype(str)==product_name)]
+    st.markdown(f"## {product_name}（製品詳細）")
+    if pm.empty:
+        st.info("該当製品が見つかりません。"); return
+    row = pm.iloc[0]
+    if "添付文書URL" in pm.columns and str(row.get("添付文書URL","")).startswith("http"):
+        st.markdown(f"[添付文書を開く]({row['添付文書URL']})")
+    display_map = {"商品番号": "一般的な製品番号"}
+    for c in pm.columns:
+        if c in ["略称","商品名","添付文書URL"]: continue
+        label = display_map.get(c, c)
+        st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div>{pretty_text_product(row[c], c)}</div>", unsafe_allow_html=True)
+
+# ===== 漢方詳細（ここからは上の関数を呼ぶだけ） =====
 def render_kampo_detail(kampo_name: str):
     st.markdown(f"## {kampo_name}")
     km = kampo_master[kampo_master["略称"].astype(str)==kampo_name] if "略称" in kampo_master.columns else pd.DataFrame()
@@ -250,9 +267,9 @@ def render_kampo_detail(kampo_name: str):
             st.info("該当製品は登録されていません。")
         else:
             for i, prod_name in enumerate(pm["商品名"].dropna().astype(str).unique().tolist(), start=1):
+                # クリックで選択 → 次の描画で詳細が出ます（明示rerun不要）
                 if st.button(f"・{prod_name}", key=f"prod_btn_{kampo_name}_{i}", use_container_width=True):
                     st.session_state["selected_product"] = prod_name
-                    # 製品詳細表示のための軽い再描画のみ（Streamlitが自動で行う）
 
     if st.session_state.get("selected_product"):
         render_product_detail(kampo_name, st.session_state["selected_product"])
@@ -260,24 +277,24 @@ def render_kampo_detail(kampo_name: str):
 # ============== 画面本体 ==============
 left, center, right = st.columns([1,2,1])
 with center:
-    # ヘッダー画像（タイトル文字は表示しない）
-    header_path = "AI_Kampo_sennin_title.png"  # プロジェクト直下に配置
+    # ヘッダー画像（タイトル文字は非表示）
+    header_path = "AI_Kampo_sennin_title.png"
     if os.path.exists(header_path):
         st.image(header_path, use_container_width=True)
     else:
-        st.markdown("## " + APP_TITLE)  # フォールバック
+        st.markdown("## " + APP_TITLE)
 
     # 右上：プラン + 無料トライアル（7日）
     col_title, col_plan = st.columns([1,1])
     with col_plan:
         st.selectbox("プラン", PLANS, key="plan")
         created = st.session_state.setdefault("created_at", dt.date.today())
-        trial   = st.session_state.setdefault("trial_days", 7)  # 7日固定
+        trial   = st.session_state.setdefault("trial_days", 7)
         remain_days = (dt.date.today() - created).days
         days_left   = max(0, trial - remain_days)
         st.caption(f"無料トライアル残り：{days_left}日")
 
-    # ===== 入力カード（フォーム→通常入力に変更：文言はそのまま）=====
+    # ===== 入力カード（通常入力＋ボタン：文言はそのまま）=====
     st.markdown("<section class='card'>", unsafe_allow_html=True)
 
     st.subheader("主症状")
@@ -306,7 +323,7 @@ with center:
 
     st.markdown("</section>", unsafe_allow_html=True)
 
-    # 送信処理：ここでは rerun しない（画面が薄くなるのを防ぐ）
+    # 送信処理：rerunしない
     if submit_clicked:
         st.session_state["main_text"]  = main_input
         st.session_state["sub_text"]   = sub_input
@@ -314,7 +331,6 @@ with center:
         st.session_state["followup_page"] = 0
         st.session_state["selected_kampo"]  = None
         st.session_state["selected_product"]= None
-        # rerun 不要：Streamlit が自動で再描画して結果表示
 
     # 候補表示
     cands = st.session_state.get("candidates", [])
@@ -326,7 +342,6 @@ with center:
             for i, c in enumerate(cands[:TOP_N], start=1):
                 pct = int(round(95 * c["score"] / top_score)) if top_score>0 else 0
                 pct = max(0, min(95, pct))
-                # クリックで詳細表示（rerunは不要）
                 if st.button(f"【{i}位】{c['略称']}（相性 {pct}%）", key=f"cand_{i}", use_container_width=True):
                     st.session_state["selected_kampo"]  = c["略称"]
                     st.session_state["selected_product"]= None
@@ -351,6 +366,6 @@ with center:
                 st.session_state["followup_page"] = page + 1
                 # rerun不要：自動再描画で次ページが表示される
 
-    # 漢方詳細（クリック後）
+    # 漢方詳細（候補クリック後）
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
