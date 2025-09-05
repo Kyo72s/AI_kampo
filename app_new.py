@@ -1,8 +1,8 @@
 # app_new.py
-# 修正点：
-# - 背景色 #ecf7da
-# - 送信/候補クリック/製剤クリックで明示rerunを使わず、二度薄くなる現象を防止
-# - 製品詳細が出ない(NameError)対処：render_product_detailを先に定義
+# 変更点（今回）：
+# - 入力欄で value 指定を廃止し、st.session_state で初期化＆保持（追記が消える問題を解消）
+# - 送信時は session_state の現在値を使ってスコア算出（1回の送信で反映）
+# - 背景色 #ecf7da / 二重リロード対策 / 製剤クリックの詳細表示は前版のまま
 
 import os, re, unicodedata, datetime as dt
 import pandas as pd
@@ -11,10 +11,10 @@ from dotenv import load_dotenv
 
 APP_TITLE = "AI漢方選人"
 TOP_N = 5
-PCT_GAP_THRESHOLD = 0.30      # 1位との差が30%未満 → 追加質問対象
-FOLLOWUP_PAGE_SIZE = 3        # 追加質問：各候補1ページあたり件数
-W_MAIN = 2                    # 主症状重み
-W_SUB  = 1                    # 他症状重み
+PCT_GAP_THRESHOLD = 0.30
+FOLLOWUP_PAGE_SIZE = 3
+W_MAIN = 2
+W_SUB  = 1
 PLANS  = ["Lite", "Standard", "Premium"]
 
 # ============== 初期セットアップ ==============
@@ -23,12 +23,9 @@ st.set_page_config(page_title=APP_TITLE, page_icon="💊", layout="wide")
 
 CUSTOM_CSS = """
 <style>
-/* 背景を #ecf7da に統一（全レイヤーへ強制）*/
 html, body, .stApp { background: #ecf7da !important; }
 [data-testid="stAppViewContainer"] { background: #ecf7da !important; }
 [data-testid="stHeader"] { background: transparent !important; }
-
-/* 幅広（1.5倍） */
 .block-container { max-width: 1740px !important; }
 
 :root { --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --stroke:#e5e7eb; }
@@ -99,7 +96,6 @@ def unify_synonym(token: str) -> str:
     return n
 
 def split_multi(text: str):
-    """ 半角/全角スペース・改行・「、」「，」「,」「/」「／」を区切り """
     if not isinstance(text, str): return []
     parts = re.split(r"[,\s、，/／]+", text)
     return [p.strip() for p in parts if p.strip()]
@@ -225,7 +221,6 @@ def pretty_text_product(v, field_name: str):
     s=re.sub(r"[ \t\u3000]{2,}"," ",s)
     return s.strip()
 
-# ===== 先に定義：製品詳細 =====
 def render_product_detail(kampo_name: str, product_name: str):
     pm = product_master
     pm = pm[(pm["略称"].astype(str)==kampo_name) & (pm["商品名"].astype(str)==product_name)]
@@ -242,7 +237,6 @@ def render_product_detail(kampo_name: str, product_name: str):
         st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
         st.markdown(f"<div>{pretty_text_product(row[c], c)}</div>", unsafe_allow_html=True)
 
-# ===== 漢方詳細（ここからは上の関数を呼ぶだけ） =====
 def render_kampo_detail(kampo_name: str):
     st.markdown(f"## {kampo_name}")
     km = kampo_master[kampo_master["略称"].astype(str)==kampo_name] if "略称" in kampo_master.columns else pd.DataFrame()
@@ -267,7 +261,6 @@ def render_kampo_detail(kampo_name: str):
             st.info("該当製品は登録されていません。")
         else:
             for i, prod_name in enumerate(pm["商品名"].dropna().astype(str).unique().tolist(), start=1):
-                # クリックで選択 → 次の描画で詳細が出ます（明示rerun不要）
                 if st.button(f"・{prod_name}", key=f"prod_btn_{kampo_name}_{i}", use_container_width=True):
                     st.session_state["selected_product"] = prod_name
 
@@ -277,7 +270,6 @@ def render_kampo_detail(kampo_name: str):
 # ============== 画面本体 ==============
 left, center, right = st.columns([1,2,1])
 with center:
-    # ヘッダー画像（タイトル文字は非表示）
     header_path = "AI_Kampo_sennin_title.png"
     if os.path.exists(header_path):
         st.image(header_path, use_container_width=True)
@@ -294,37 +286,48 @@ with center:
         days_left   = max(0, trial - remain_days)
         st.caption(f"無料トライアル残り：{days_left}日")
 
-    # ===== 入力カード（通常入力＋ボタン：文言はそのまま）=====
+    # ===== 入力カード（通常入力＋ボタン／valueは使わない）=====
+    # 1回だけ初期化（既に入っていれば触らない）
+    if "form_main" not in st.session_state:
+        st.session_state["form_main"] = st.session_state.get("main_text", "")
+    if "form_sub" not in st.session_state:
+        st.session_state["form_sub"]  = st.session_state.get("sub_text", "")
+
     st.markdown("<section class='card'>", unsafe_allow_html=True)
 
     st.subheader("主症状")
     st.caption("最も気になる症状を1〜2語で入力してください（例：吐き気、頭痛）")
-    main_input = st.text_input(
-        "主症状入力", key="form_main",
-        value=st.session_state.get("main_text",""),
-        placeholder="例：吐き気 頭痛", label_visibility="collapsed"
+    st.text_input(
+        "主症状入力",
+        key="form_main",
+        placeholder="例：吐き気 頭痛",
+        label_visibility="collapsed",
     )
 
     st.subheader("他に気になる症状")
     st.caption("他に気になる症状・体質を自由に入力してください（例：めまい だるい 口渇 など）")
-    sub_input  = st.text_area(
-        "他症状入力", key="form_sub",
-        value=st.session_state.get("sub_text",""),
-        height=90, placeholder="例：めまい だるい 口渇 など", label_visibility="collapsed"
+    st.text_area(
+        "他症状入力",
+        key="form_sub",
+        height=90,
+        placeholder="例：めまい だるい 口渇 など",
+        label_visibility="collapsed",
     )
 
     colS, colR = st.columns([1,1])
     submit_clicked = colS.button("送信", type="primary")
     if colR.button("🔄 新しい漢方選びを始める"):
         st.session_state.update(main_text="", sub_text="", candidates=[],
-                               followup_page=0, selected_kampo=None, selected_product=None)
-        # リセット時のみ rerun（意図した初期化）
+                               followup_page=0, selected_kampo=None, selected_product=None,
+                               form_main="", form_sub="")
         st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
 
     st.markdown("</section>", unsafe_allow_html=True)
 
-    # 送信処理：rerunしない
+    # 送信処理：session_state の現在値をそのまま利用（rerunしない）
     if submit_clicked:
+        main_input = st.session_state.get("form_main","")
+        sub_input  = st.session_state.get("form_sub","")
         st.session_state["main_text"]  = main_input
         st.session_state["sub_text"]   = sub_input
         st.session_state["candidates"] = score_candidates(main_input, sub_input)
@@ -346,7 +349,6 @@ with center:
                     st.session_state["selected_kampo"]  = c["略称"]
                     st.session_state["selected_product"]= None
 
-        # 追加質問（差が小さい時）
         if not pct_gap_large_enough(cands, threshold=PCT_GAP_THRESHOLD):
             group = target_group(cands)
             uniq_dict_raw = unique_per_candidate_within_group_raw(group)
@@ -366,6 +368,6 @@ with center:
                 st.session_state["followup_page"] = page + 1
                 # rerun不要：自動再描画で次ページが表示される
 
-    # 漢方詳細（候補クリック後）
+    # 漢方詳細
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
