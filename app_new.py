@@ -1,8 +1,9 @@
 # app_new.py
-# 修正点：
-# - st.image を use_container_width=True に変更（赤い注意を解消）
-# - 背景色を #D7FFB6 に統一（ページ全体に強制適用）
-# - フォーム送信時の st.rerun() を削除して、送信後の二重リロードを防止
+# 変更点：
+# - 背景色を #ecf7da に統一
+# - 送信ボタン押下時の二重リロードを解消（フォーム→通常入力+ボタンへ）
+# - タイトル文字の代わりにヘッダー画像を use_container_width=True で表示
+# - それ以外の挙動や文言は従来どおり
 
 import os, re, unicodedata, datetime as dt
 import pandas as pd
@@ -23,9 +24,9 @@ st.set_page_config(page_title=APP_TITLE, page_icon="💊", layout="wide")
 
 CUSTOM_CSS = """
 <style>
-/* 背景を #D7FFB6 に統一（全レイヤーに強制） */
-html, body, .stApp { background: #D7FFB6 !important; }
-[data-testid="stAppViewContainer"] { background: #D7FFB6 !important; }
+/* 背景を #ecf7da に統一（全レイヤーへ強制）*/
+html, body, .stApp { background: #ecf7da !important; }
+[data-testid="stAppViewContainer"] { background: #ecf7da !important; }
 [data-testid="stHeader"] { background: transparent !important; }
 
 /* 幅広（1.5倍） */
@@ -165,7 +166,8 @@ def pct_gap_large_enough(cands, threshold=PCT_GAP_THRESHOLD):
     return (1.0 - s2/s1) >= threshold
 
 def all_entered_tokens_norm() -> set[str]:
-    toks = [*split_multi(st.session_state.get("main_text","")), *split_multi(st.session_state.get("sub_text",""))]
+    toks = [*split_multi(st.session_state.get("main_text","")),
+            *split_multi(st.session_state.get("sub_text",""))]
     return {unify_synonym(x) for x in toks if x}
 
 def unique_per_candidate_within_group_raw(group_names):
@@ -250,81 +252,69 @@ def render_kampo_detail(kampo_name: str):
             for i, prod_name in enumerate(pm["商品名"].dropna().astype(str).unique().tolist(), start=1):
                 if st.button(f"・{prod_name}", key=f"prod_btn_{kampo_name}_{i}", use_container_width=True):
                     st.session_state["selected_product"] = prod_name
-                    st.rerun() if hasattr(st, "rerun") else st.experimental_rerun()
+                    # 製品詳細表示のための軽い再描画のみ（Streamlitが自動で行う）
 
     if st.session_state.get("selected_product"):
         render_product_detail(kampo_name, st.session_state["selected_product"])
 
-def render_product_detail(kampo_name: str, product_name: str):
-    pm = product_master
-    pm = pm[(pm["略称"].astype(str)==kampo_name) & (pm["商品名"].astype(str)==product_name)]
-    st.markdown(f"## {product_name}（製品詳細）")
-    if pm.empty:
-        st.info("該当製品が見つかりません。"); return
-    row = pm.iloc[0]
-    if "添付文書URL" in pm.columns and str(row.get("添付文書URL","")).startswith("http"):
-        st.markdown(f"[添付文書を開く]({row['添付文書URL']})")
-    display_map = {"商品番号": "一般的な製品番号"}
-    for c in pm.columns:
-        if c in ["略称","商品名","添付文書URL"]: continue
-        label = display_map.get(c, c)
-        st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div>{pretty_text_product(row[c], c)}</div>", unsafe_allow_html=True)
-
 # ============== 画面本体 ==============
 left, center, right = st.columns([1,2,1])
 with center:
-
     # ヘッダー画像（タイトル文字は表示しない）
     header_path = "AI_Kampo_sennin_title.png"  # プロジェクト直下に配置
     if os.path.exists(header_path):
         st.image(header_path, use_container_width=True)
     else:
-        st.markdown("## " + APP_TITLE)  # フォールバック（画像がない場合のみ）
+        st.markdown("## " + APP_TITLE)  # フォールバック
 
     # 右上：プラン + 無料トライアル（7日）
     col_title, col_plan = st.columns([1,1])
     with col_plan:
         st.selectbox("プラン", PLANS, key="plan")
         created = st.session_state.setdefault("created_at", dt.date.today())
-        trial   = st.session_state.setdefault("trial_days", 7)  # 7日に固定
+        trial   = st.session_state.setdefault("trial_days", 7)  # 7日固定
         remain_days = (dt.date.today() - created).days
         days_left   = max(0, trial - remain_days)
         st.caption(f"無料トライアル残り：{days_left}日")
 
-    # 入力カード（form：1回送信でリロード1回のみに）
+    # ===== 入力カード（フォーム→通常入力に変更：文言はそのまま）=====
     st.markdown("<section class='card'>", unsafe_allow_html=True)
-    with st.form(key="symptom_form", clear_on_submit=False):
-        st.subheader("主症状")
-        st.caption("最も気になる症状を1〜2語で入力してください（例：吐き気、頭痛）")
-        main_input = st.text_input("主症状入力", key="form_main",
-                                   value=st.session_state.get("main_text",""),
-                                   placeholder="例：吐き気 頭痛", label_visibility="collapsed")
 
-        st.subheader("他に気になる症状")
-        st.caption("他に気になる症状・体質を自由に入力してください（例：めまい だるい 口渇 など）")
-        sub_input  = st.text_area("他症状入力", key="form_sub",
-                                  value=st.session_state.get("sub_text",""),
-                                  height=90, placeholder="例：めまい だるい 口渇 など", label_visibility="collapsed")
+    st.subheader("主症状")
+    st.caption("最も気になる症状を1〜2語で入力してください（例：吐き気、頭痛）")
+    main_input = st.text_input(
+        "主症状入力", key="form_main",
+        value=st.session_state.get("main_text",""),
+        placeholder="例：吐き気 頭痛", label_visibility="collapsed"
+    )
 
-        colS, colR = st.columns([1,1])
-        submitted = colS.form_submit_button("送信", type="primary")
-        if colR.form_submit_button("🔄 新しい漢方選びを始める"):
-            st.session_state.update(main_text="", sub_text="", candidates=[],
-                                   followup_page=0, selected_kampo=None, selected_product=None)
-            # リセットは rerun して良い（操作の明確さ重視）
-            st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
+    st.subheader("他に気になる症状")
+    st.caption("他に気になる症状・体質を自由に入力してください（例：めまい だるい 口渇 など）")
+    sub_input  = st.text_area(
+        "他症状入力", key="form_sub",
+        value=st.session_state.get("sub_text",""),
+        height=90, placeholder="例：めまい だるい 口渇 など", label_visibility="collapsed"
+    )
+
+    colS, colR = st.columns([1,1])
+    submit_clicked = colS.button("送信", type="primary")
+    if colR.button("🔄 新しい漢方選びを始める"):
+        st.session_state.update(main_text="", sub_text="", candidates=[],
+                               followup_page=0, selected_kampo=None, selected_product=None)
+        # リセット時のみ rerun（意図した初期化）
+        st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
+
     st.markdown("</section>", unsafe_allow_html=True)
 
-    # 送信処理：フォーム自体が1回リロードするので、ここでは rerun しない
-    if submitted:
+    # 送信処理：ここでは rerun しない（画面が薄くなるのを防ぐ）
+    if submit_clicked:
         st.session_state["main_text"]  = main_input
         st.session_state["sub_text"]   = sub_input
         st.session_state["candidates"] = score_candidates(main_input, sub_input)
         st.session_state["followup_page"] = 0
         st.session_state["selected_kampo"]  = None
         st.session_state["selected_product"]= None
-        # ★ rerun しない：二重実行の原因になるため
+        # rerun 不要：Streamlit が自動で再描画して結果表示
 
     # 候補表示
     cands = st.session_state.get("candidates", [])
@@ -336,12 +326,12 @@ with center:
             for i, c in enumerate(cands[:TOP_N], start=1):
                 pct = int(round(95 * c["score"] / top_score)) if top_score>0 else 0
                 pct = max(0, min(95, pct))
+                # クリックで詳細表示（rerunは不要）
                 if st.button(f"【{i}位】{c['略称']}（相性 {pct}%）", key=f"cand_{i}", use_container_width=True):
                     st.session_state["selected_kampo"]  = c["略称"]
                     st.session_state["selected_product"]= None
-                    # ここは押した瞬間に詳細へ移るため rerun 維持
-                    st.rerun() if hasattr(st, "rerun") else st.experimental_rerun()
 
+        # 追加質問（差が小さい時）
         if not pct_gap_large_enough(cands, threshold=PCT_GAP_THRESHOLD):
             group = target_group(cands)
             uniq_dict_raw = unique_per_candidate_within_group_raw(group)
@@ -359,7 +349,7 @@ with center:
                 more_exists = True
             if more_exists and st.button("さらに症状を提案する"):
                 st.session_state["followup_page"] = page + 1
-                st.rerun() if hasattr(st, "rerun") else st.experimental_rerun()
+                # rerun不要：自動再描画で次ページが表示される
 
     # 漢方詳細（クリック後）
     if st.session_state.get("selected_kampo"):
