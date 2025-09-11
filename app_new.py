@@ -211,12 +211,14 @@ def pretty_text_product(v, field_name: str):
     # 改行マーカー
     s=re.sub(r"(?:<br\s*/?>|\[\[BR\]\]|\\n|⏎|＜改行＞|<改行>)","\n",s,flags=re.IGNORECASE)
     if field_name == "組成":
-        # 1) 必ず「日局」の直前で改行（既に改行なら二重改行にならない）
+        # 先に「句点の直後の 日局」を確実に改行
+        s = re.sub(r"。\s*日局", "。\n日局", s)
+        # 任意位置の「日局」の直前に改行（既に改行なら変化なし）
         s = re.sub(r"(?<!\n)日局", r"\n日局", s)
-        # 2) キーワード直前でも改行（保険）
+        # キーワード直前でも改行（保険）
         for kw in [r"より製した", r"上記", r"本剤7\.5g中、\s*上記の", r"以上の"]:
             s = re.sub(rf"[ \t\u3000]*(?={kw})", "\n", s)
-        # 3) g の直後 / 句点後 で改行
+        # g の直後 / 句点後 で改行
         s = re.sub(r"(?<=g)[ \t\u3000]*", "\n", s)
         s = re.sub(r"。\s*", "。\n", s)
     else:
@@ -250,35 +252,40 @@ def render_kampo_detail(kampo_name: str):
         else:
             row = km.iloc[0].to_dict()
 
-            def show(label, colkey):
-                val = row.get(colkey, "")
-                if str(val).strip() != "":
+            # ふりがなは値だけ（ラベル無しで表示）
+            furi = str(row.get("ふりがな","")).strip()
+            if furi:
+                st.markdown(f"{pretty_text_common(furi)}")
+
+            # 以下、指定順で表示（存在しない列は自動スキップ）
+            def show(label, key):
+                val = str(row.get(key,"")).strip()
+                if val:
                     st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div>{pretty_text_common(val)}</div>", unsafe_allow_html=True)
 
-            # 指定順に表示（存在しない列はスキップ）
+            show("一般的な製品番号", "一般的な製品番号")
             show("出典", "出典")
 
-            # 証（表裏・寒熱・虚実）として「証」を表示
-            if "証" in row and str(row["証"]).strip()!="":
+            # 証（表裏・寒熱・虚実）：元データ「証」をこのラベルで表示
+            val_sho = str(row.get("証","")).strip()
+            if val_sho:
                 st.markdown("<div class='kv'>証（表裏・寒熱・虚実）</div>", unsafe_allow_html=True)
-                st.markdown(f"<div>{pretty_text_common(row['証'])}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div>{pretty_text_common(val_sho)}</div>", unsafe_allow_html=True)
 
             # 六病位 ／ 虚実（両方あれば結合、片方だけでも出す）
-            # 別名対策：列名のゆらぎを吸収（例：'虚/実', '脈診'などは今回は非対象）
-            lv = row.get("六病位", "")
-            kj = row.get("虚実", "") or row.get("虚／実","") or row.get("虚/実","")
-            if str(lv).strip()!="" or str(kj).strip()!="":
+            lv = str(row.get("六病位","") or row.get("六病位 ", "")).strip()
+            kj = str(row.get("虚実","") or row.get("虚／実","") or row.get("虚/実","")).strip()
+            if lv or kj:
                 st.markdown("<div class='kv'>六病位 ／ 虚実</div>", unsafe_allow_html=True)
-                comb = " ／ ".join([s for s in [str(lv).strip(), str(kj).strip()] if s!=""])
-                st.markdown(f"<div>{pretty_text_common(comb)}</div>", unsafe_allow_html=True)
+                combine = " ／ ".join([x for x in [lv, kj] if x])
+                st.markdown(f"<div>{pretty_text_common(combine)}</div>", unsafe_allow_html=True)
 
             show("脈", "脈")
             show("舌", "舌")
             show("腹", "腹")
             show("漢方弁証", "漢方弁証")
             show("中医弁証", "中医弁証")
-            show("一般的な製品番号", "一般的な製品番号")
 
     if set(["略称","商品名"]).issubset(product_master.columns):
         pm = product_master[product_master["略称"].astype(str)==kampo_name]
@@ -388,3 +395,4 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
