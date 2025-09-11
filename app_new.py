@@ -243,50 +243,50 @@ def render_product_detail(kampo_name: str, product_name: str):
         st.markdown(f"<div>{pretty_text_product(row[c], c)}</div>", unsafe_allow_html=True)
 
 def render_kampo_detail(kampo_name: str):
+    """漢方解説の表示順を指定どおりに整形して表示する"""
     st.markdown(f"## {kampo_name}")
-    km = kampo_master[kampo_master["略称"].astype(str)==kampo_name] if "略称" in kampo_master.columns else pd.DataFrame()
+
+    # 対象行を取得
+    km = kampo_master[kampo_master["略称"].astype(str) == kampo_name] if "略称" in kampo_master.columns else pd.DataFrame()
     with st.container():
         st.markdown("### 漢方解説")
         if km.empty:
             st.info("漢方薬マスタに該当データがありません。")
-        else:
-            row = km.iloc[0].to_dict()
+            return
 
-            # ふりがなは値だけ（ラベル無しで表示）
-            furi = str(row.get("ふりがな","")).strip()
-            if furi:
-                st.markdown(f"{pretty_text_common(furi)}")
+        row = km.iloc[0].to_dict()
 
-            # 以下、指定順で表示（存在しない列は自動スキップ）
-            def show(label, key):
-                val = str(row.get(key,"")).strip()
-                if val:
-                    st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div>{pretty_text_common(val)}</div>", unsafe_allow_html=True)
+        # 値だけ表示する（ラベル無し）
+        def show_value_only(key):
+            v = str(row.get(key, "")).strip()
+            if v:
+                st.markdown(f"{pretty_text_common(v)}")
 
-            show("一般的な製品番号", "一般的な製品番号")
-            show("出典", "出典")
+        # ラベル＋値（通常表示）
+        def show_labeled(label, key):
+            v = str(row.get(key, "")).strip()
+            if v:
+                st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div>{pretty_text_common(v)}</div>", unsafe_allow_html=True)
 
-            # 証（表裏・寒熱・虚実）：元データ「証」をこのラベルで表示
-            val_sho = str(row.get("証","")).strip()
-            if val_sho:
-                st.markdown("<div class='kv'>証（表裏・寒熱・虚実）</div>", unsafe_allow_html=True)
-                st.markdown(f"<div>{pretty_text_common(val_sho)}</div>", unsafe_allow_html=True)
+        # 1) 「略称」「ふりがな」をラベル無しで上に表示
+        #    （略称は通常は kampo_name と同じですが、CSVの値をそのまま出します）
+        show_value_only("略称")     # ラベル無し
+        show_value_only("ふりがな")  # ラベル無し
 
-            # 六病位 ／ 虚実（両方あれば結合、片方だけでも出す）
-            lv = str(row.get("六病位","") or row.get("六病位 ", "")).strip()
-            kj = str(row.get("虚実","") or row.get("虚／実","") or row.get("虚/実","")).strip()
-            if lv or kj:
-                st.markdown("<div class='kv'>六病位 ／ 虚実</div>", unsafe_allow_html=True)
-                combine = " ／ ".join([x for x in [lv, kj] if x])
-                st.markdown(f"<div>{pretty_text_common(combine)}</div>", unsafe_allow_html=True)
+        # 2) 指定順に表示（存在する項目だけ）
+        #    一般的な製品番号 → 出典 → 証 → 六病位／虚実 → 脈 → 舌 → 腹 → 漢方弁証 → 中医弁証
+        show_labeled("一般的な製品番号", "一般的な製品番号")
+        show_labeled("出典", "出典")
+      　show_labeled("証（表裏・寒熱・虚実）", "証（表裏・寒熱・虚実）")
+        show_labeled("六病位 ／ 虚実", "六病位 ／ 虚実")
+        show_labeled("脈", "脈")
+        show_labeled("舌", "舌")
+        show_labeled("腹", "腹")
+        show_labeled("漢方弁証", "漢方弁証")
+        show_labeled("中医弁証", "中医弁証")
 
-            show("脈", "脈")
-            show("舌", "舌")
-            show("腹", "腹")
-            show("漢方弁証", "漢方弁証")
-            show("中医弁証", "中医弁証")
-
+    # === 以下は従来どおり（製剤一覧→製品詳細） ===
     if set(["略称","商品名"]).issubset(product_master.columns):
         pm = product_master[product_master["略称"].astype(str)==kampo_name]
         st.markdown("### 保険収載漢方エキス製剤一覧")
@@ -300,6 +300,7 @@ def render_kampo_detail(kampo_name: str):
 
     if st.session_state.get("selected_product"):
         render_product_detail(kampo_name, st.session_state["selected_product"])
+
 
 # ============== 画面本体（薄さ最小化のロジックは前版のまま） ==============
 left, center, right = st.columns([1,2,1])
@@ -395,4 +396,5 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
