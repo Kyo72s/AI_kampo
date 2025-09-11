@@ -243,10 +243,9 @@ def render_product_detail(kampo_name: str, product_name: str):
         st.markdown(f"<div>{pretty_text_product(row[c], c)}</div>", unsafe_allow_html=True)
 
 def render_kampo_detail(kampo_name: str):
-    """漢方解説の表示順を指定どおりに整形して表示する"""
+    """CSV(kampo_master.csv)の列名を尊重した順で漢方解説を表示する"""
     st.markdown(f"## {kampo_name}")
 
-    # 対象行を取得
     km = kampo_master[kampo_master["略称"].astype(str) == kampo_name] if "略称" in kampo_master.columns else pd.DataFrame()
     with st.container():
         st.markdown("### 漢方解説")
@@ -254,51 +253,52 @@ def render_kampo_detail(kampo_name: str):
             st.info("漢方薬マスタに該当データがありません。")
             return
 
-        row = km.iloc[0].to_dict()
+        row_dict = km.iloc[0].to_dict()
 
-        # 値だけ表示する（ラベル無し）
-        def show_value_only(key):
-            v = str(row.get(key, "")).strip()
+        # 列名の空白ゆらぎを吸収（全角/半角スペースをすべて除去して比較）
+        def norm_key(s: str) -> str:
+            return re.sub(r"\s+", "", str(s))
+
+        # 実列名を安全に見つける
+        def get_val_by_label(label: str) -> str:
+            target = norm_key(label)
+            for k, v in row_dict.items():
+                if norm_key(k) == target:
+                    return "" if v is None else str(v).strip()
+            return ""
+
+        # 値だけ表示（ラベル無し）
+        def show_value_only(label: str):
+            v = get_val_by_label(label)
             if v:
                 st.markdown(f"{pretty_text_common(v)}")
 
-        # ラベル＋値（通常表示）
-        def show_labeled(label, key):
-            v = str(row.get(key, "")).strip()
+        # ラベル＋値
+        def show_labeled(label: str):
+            v = get_val_by_label(label)
             if v:
                 st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div>{pretty_text_common(v)}</div>", unsafe_allow_html=True)
 
-        # 1) 「略称」「ふりがな」をラベル無しで上に表示
-        #    （略称は通常は kampo_name と同じですが、CSVの値をそのまま出します）
-        show_value_only("略称")     # ラベル無し
-        show_value_only("ふりがな")  # ラベル無し
+        # 1) 略称・ふりがな はラベル無しで上に表示
+        show_value_only("略称")
+        show_value_only("ふりがな")
 
-        # 2) 指定順に表示（存在する項目だけ）
-        #    一般的な製品番号 → 出典 → 証 → 六病位／虚実 → 脈 → 舌 → 腹 → 漢方弁証 → 中医弁証
-        show_labeled("一般的な製品番号", "一般的な製品番号")
-        show_labeled("出典", "出典")
+        # 2) 以降はCSVの列名どおり、指定順に“そのまま”表示
+        ordered_labels = [
+            "出典",
+            "証（表裏・寒熱・虚実）",
+            "六病位 ／  虚実",   # 空白の有無は norm_key で無視して突き合わせます
+            "脈",
+            "舌",
+            "腹",
+            "漢方弁証",
+            "中医弁証",
+        ]
+        for lab in ordered_labels:
+            show_labeled(lab)
 
-        # 証（表裏・寒熱・虚実）：CSV上の「証」をこのラベルで出す
-        if str(row.get("証", "")).strip():
-            st.markdown("<div class='kv'>証（表裏・寒熱・虚実）</div>", unsafe_allow_html=True)
-            st.markdown(f"<div>{pretty_text_common(row['証'])}</div>", unsafe_allow_html=True)
-
-        # 六病位 ／ 虚実：両方あれば結合、片方だけでも出す
-        val_lv = str(row.get("六病位", "")).strip()
-        val_kj = str(row.get("虚実", "")).strip()
-        if val_lv or val_kj:
-            st.markdown("<div class='kv'>六病位 ／ 虚実</div>", unsafe_allow_html=True)
-            comb = " ／ ".join([x for x in [val_lv, val_kj] if x])
-            st.markdown(f"<div>{pretty_text_common(comb)}</div>", unsafe_allow_html=True)
-      
-        show_labeled("脈", "脈")
-        show_labeled("舌", "舌")
-        show_labeled("腹", "腹")
-        show_labeled("漢方弁証", "漢方弁証")
-        show_labeled("中医弁証", "中医弁証")
-
-    # === 以下は従来どおり（製剤一覧→製品詳細） ===
+    # === 製剤一覧（従来どおり） ===
     if set(["略称","商品名"]).issubset(product_master.columns):
         pm = product_master[product_master["略称"].astype(str)==kampo_name]
         st.markdown("### 保険収載漢方エキス製剤一覧")
@@ -408,6 +408,7 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
 
 
