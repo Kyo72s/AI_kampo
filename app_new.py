@@ -278,8 +278,20 @@ def render_kampo_detail(kampo_name: str):
         #    一般的な製品番号 → 出典 → 証 → 六病位／虚実 → 脈 → 舌 → 腹 → 漢方弁証 → 中医弁証
         show_labeled("一般的な製品番号", "一般的な製品番号")
         show_labeled("出典", "出典")
-      　show_labeled("証（表裏・寒熱・虚実）", "証（表裏・寒熱・虚実）")
-        show_labeled("六病位 ／ 虚実", "六病位 ／ 虚実")
+
+        # 証（表裏・寒熱・虚実）：CSV上の「証」をこのラベルで出す
+        if str(row.get("証", "")).strip():
+            st.markdown("<div class='kv'>証（表裏・寒熱・虚実）</div>", unsafe_allow_html=True)
+            st.markdown(f"<div>{pretty_text_common(row['証'])}</div>", unsafe_allow_html=True)
+
+        # 六病位 ／ 虚実：両方あれば結合、片方だけでも出す
+        val_lv = str(row.get("六病位", "")).strip()
+        val_kj = str(row.get("虚実", "")).strip()
+        if val_lv or val_kj:
+            st.markdown("<div class='kv'>六病位 ／ 虚実</div>", unsafe_allow_html=True)
+            comb = " ／ ".join([x for x in [val_lv, val_kj] if x])
+            st.markdown(f"<div>{pretty_text_common(comb)}</div>", unsafe_allow_html=True)
+      
         show_labeled("脈", "脈")
         show_labeled("舌", "舌")
         show_labeled("腹", "腹")
@@ -396,5 +408,6 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
 
