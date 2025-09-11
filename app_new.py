@@ -207,24 +207,36 @@ def pretty_text_common(v):
     return s.strip() if s.strip() else "特になし"
 
 def pretty_text_product(v, field_name: str):
-    s=str(v)
-    # 改行マーカー
-    s=re.sub(r"(?:<br\s*/?>|\[\[BR\]\]|\\n|⏎|＜改行＞|<改行>)","\n",s,flags=re.IGNORECASE)
+    s = str(v)
+
+    # 改行マーカーを統一
+    s = re.sub(r"(?:<br\s*/?>|\[\[BR\]\]|\\n|⏎|＜改行＞|<改行>)", "\n", s, flags=re.IGNORECASE)
+
     if field_name == "組成":
-        # 先に「句点の直後の 日局」を確実に改行
-        s = re.sub(r"。\s*日局", "。\n日局", s)
-        # 任意位置の「日局」の直前に改行（既に改行なら変化なし）
-        s = re.sub(r"(?<!\n)日局", r"\n日局", s)
-        # キーワード直前でも改行（保険）
+        # ① 句点の直後は必ず改行
+        s = re.sub(r"。\s*", "。\n", s)
+
+        # ② 「日局」の直前は必ず改行（1行目の最初にあるケースも含め徹底）
+        #    いったん全ての「日局」を改行付きに置換 → 連続改行を詰める → 先頭の改行を除去
+        s = s.replace("日局", "\n日局")
+        s = re.sub(r"\n{2,}", "\n", s)
+        s = s.lstrip("\n")
+
+        # ③ その他のキーワードの直前でも改行（保険）
         for kw in [r"より製した", r"上記", r"本剤7\.5g中、\s*上記の", r"以上の"]:
             s = re.sub(rf"[ \t\u3000]*(?={kw})", "\n", s)
-        # g の直後 / 句点後 で改行
+
+        # ④ 「…3.0g」など g の直後でも改行（読みやすさ向上）
         s = re.sub(r"(?<=g)[ \t\u3000]*", "\n", s)
-        s = re.sub(r"。\s*", "。\n", s)
+
     else:
-        s = re.sub(r"。[ \t\u3000]*","。\n",s)
-    s=re.sub(r"[ \t\u3000]{2,}"," ",s)
+        # 組成以外は句点で改行
+        s = re.sub(r"。[ \t\u3000]*", "。\n", s)
+
+    # 余計な連続スペースを整理
+    s = re.sub(r"[ \t\u3000]{2,}", " ", s)
     return s.strip()
+
 
 def render_product_detail(kampo_name: str, product_name: str):
     pm = product_master
@@ -408,6 +420,7 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
 
 
