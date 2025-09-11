@@ -1,9 +1,9 @@
 # app_new.py
 # 修正点：
-# - 初回送信でも即結果表示（送信直後はローカル変数で表示。rerun不要）
-# - リセットは「フラグ→rerun→最初にまとめて初期化」で安全に（Widget後のstate変更エラー解消）
-# - 入力欄は session_state で初期化し、keyのみで管理（追記が消えない）
-# - 背景 #ecf7da / 製剤詳細表示 は従来どおり
+# - フォーム送信直後に new_cands で即時表示（初回無反応を解消）
+# - リセットは上部に1ボタンだけ配置 → フラグ→rerun→先頭で初期化（薄くなるのは1回）
+# - 漢方解説の表示順を指定順に変更（六病位／虚実を結合表示、証はリネーム、一般的な製品番号は存在時のみ）
+# - 背景 #ecf7da、製剤詳細は従来どおり
 
 import os, re, unicodedata, datetime as dt
 import pandas as pd
@@ -244,13 +244,35 @@ def render_kampo_detail(kampo_name: str):
         if km.empty:
             st.info("漢方薬マスタに該当データがありません。")
         else:
-            preferred = ["ふりがな","出典","証","六病位","脈","舌","腹","漢方弁証","中医弁証"]
-            hide_cols = {"略称","症状","漢方薬の事典の並び方"}
-            cols = [c for c in preferred if c in km.columns] + [c for c in km.columns if c not in preferred and c not in hide_cols]
-            row = km.iloc[0]
-            for c in cols:
-                st.markdown(f"<div class='kv'>{c}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div>{pretty_text_common(row[c])}</div>", unsafe_allow_html=True)
+            # ご指定の表示順（存在しない列は自動スキップ）
+            row = km.iloc[0].to_dict()
+            def show(label, colkey):
+                if colkey in row and str(row[colkey]).strip()!="":
+                    st.markdown(f"<div class='kv'>{label}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div>{pretty_text_common(row[colkey])}</div>", unsafe_allow_html=True)
+
+            show("ふりがな", "ふりがな")
+            show("出典", "出典")
+
+            # 証（表裏・寒熱・虚実）…「証」カラムをこのラベルで表示
+            if "証" in row and str(row["証"]).strip()!="":
+                st.markdown(f"<div class='kv'>証（表裏・寒熱・虚実）</div>", unsafe_allow_html=True)
+                st.markdown(f"<div>{pretty_text_common(row['証'])}</div>", unsafe_allow_html=True)
+
+            # 六病位 ／ 虚実 … 2つあれば結合、片方ならそのまま
+            lv = row.get("六病位","")
+            kj = row.get("虚実","")
+            if str(lv).strip()!="" or str(kj).strip()!="":
+                st.markdown(f"<div class='kv'>六病位 ／ 虚実</div>", unsafe_allow_html=True)
+                comb = " ／ ".join([s for s in [str(lv).strip(), str(kj).strip()] if s!=""])
+                st.markdown(f"<div>{pretty_text_common(comb)}</div>", unsafe_allow_html=True)
+
+            show("脈", "脈")
+            show("舌", "舌")
+            show("腹", "腹")
+            show("漢方弁証", "漢方弁証")
+            show("中医弁証", "中医弁証")
+            show("一般的な製品番号", "一般的な製品番号")
 
     if set(["略称","商品名"]).issubset(product_master.columns):
         pm = product_master[product_master["略称"].astype(str)==kampo_name]
@@ -269,21 +291,25 @@ def render_kampo_detail(kampo_name: str):
 # ============== 画面本体 ==============
 left, center, right = st.columns([1,2,1])
 with center:
-    # 1) リセットフラグを先頭で処理（Widget生成前にstateを初期化）
+    # 先頭でリセット処理（ウィジェット生成前なので安全）
     if st.session_state.get("_do_reset"):
         for k in ["form_main","form_sub","main_text","sub_text","candidates",
                   "followup_page","selected_kampo","selected_product"]:
             st.session_state.pop(k, None)
-        st.session_state["_do_reset"] = False  # フラグ解除
+        st.session_state["_do_reset"] = False
 
-    # 2) ヘッダー画像
     header_path = "AI_Kampo_sennin_title.png"
     if os.path.exists(header_path):
         st.image(header_path, use_container_width=True)
     else:
         st.markdown("## " + APP_TITLE)
 
-    # 3) 右上のプラン＋無料トライアル（7日）
+    # 上部にリセットボタンを1つだけ（薄くなるのは1回）
+    if st.button("🔄 新しい漢方選びを始める", help="入力欄・候補をクリアします"):
+        st.session_state["_do_reset"] = True
+        st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
+
+    # 右上：プラン + 無料トライアル（7日）
     col_title, col_plan = st.columns([1,1])
     with col_plan:
         st.selectbox("プラン", PLANS, key="plan")
@@ -293,36 +319,30 @@ with center:
         days_left   = max(0, trial - remain_days)
         st.caption(f"無料トライアル残り：{days_left}日")
 
-    # 4) 入力欄（初期化は最初の1回のみ）
+    # 入力欄の初期化（最初の1回だけ）
     if "form_main" not in st.session_state:
         st.session_state["form_main"] = st.session_state.get("main_text","")
     if "form_sub" not in st.session_state:
         st.session_state["form_sub"]  = st.session_state.get("sub_text","")
 
     st.markdown("<section class='card'>", unsafe_allow_html=True)
+    with st.form("symptom_form", clear_on_submit=False):
+        st.subheader("主症状")
+        st.caption("最も気になる症状を1〜2語で入力してください（例：吐き気、頭痛）")
+        st.text_input("主症状入力", key="form_main",
+                      placeholder="例：吐き気 頭痛", label_visibility="collapsed")
 
-    st.subheader("主症状")
-    st.caption("最も気になる症状を1〜2語で入力してください（例：吐き気、頭痛）")
-    st.text_input("主症状入力", key="form_main",
-                  placeholder="例：吐き気 頭痛", label_visibility="collapsed")
+        st.subheader("他に気になる症状")
+        st.caption("他に気になる症状・体質を自由に入力してください（例：めまい だるい 口渇 など）")
+        st.text_area("他症状入力", key="form_sub", height=90,
+                     placeholder="例：めまい だるい 口渇 など", label_visibility="collapsed")
 
-    st.subheader("他に気になる症状")
-    st.caption("他に気になる症状・体質を自由に入力してください（例：めまい だるい 口渇 など）")
-    st.text_area("他症状入力", key="form_sub", height=90,
-                 placeholder="例：めまい だるい 口渇 など", label_visibility="collapsed")
-
-    colS, colR = st.columns([1,1])
-    submit_clicked = colS.button("送信", type="primary")
-    if colR.button("🔄 新しい漢方選びを始める"):
-        st.session_state["_do_reset"] = True   # 先頭で初期化させる
-        st.rerun() if hasattr(st,"rerun") else st.experimental_rerun()
-
+        submitted = st.form_submit_button("送信", type="primary")
     st.markdown("</section>", unsafe_allow_html=True)
 
-    # 5) 送信処理（初回から即表示 / rerun不要）
-    #    → 送信直後の候補は new_cands でそのまま表示に使う
+    # 送信直後は new_cands を使って即時表示（初回無反応の回避）
     new_cands = None
-    if submit_clicked:
+    if submitted:
         main_input = st.session_state.get("form_main","")
         sub_input  = st.session_state.get("form_sub","")
         st.session_state["main_text"]  = main_input
@@ -333,7 +353,7 @@ with center:
         st.session_state["selected_kampo"]  = None
         st.session_state["selected_product"]= None
 
-    # 6) 候補表示（送信直後は new_cands を優先して即時表示）
+    # 候補表示（送信直後は new_cands を優先）
     cands = new_cands if new_cands is not None else st.session_state.get("candidates", [])
     if cands:
         with st.container():
@@ -347,6 +367,7 @@ with center:
                     st.session_state["selected_kampo"]  = c["略称"]
                     st.session_state["selected_product"]= None
 
+        # 追加質問（差が小さい時）
         if not pct_gap_large_enough(cands, threshold=PCT_GAP_THRESHOLD):
             group = target_group(cands)
             uniq_dict_raw = unique_per_candidate_within_group_raw(group)
@@ -365,6 +386,6 @@ with center:
             if more_exists and st.button("さらに症状を提案する"):
                 st.session_state["followup_page"] = page + 1
 
-    # 7) 漢方詳細
+    # 漢方詳細
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
