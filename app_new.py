@@ -206,7 +206,7 @@ def pretty_text_common(v):
     s=re.sub(r"[ \t\u3000]{2,}"," ",s)
     return s.strip() if s.strip() else "特になし"
 
-def def pretty_text_product(v, field_name: str):
+def pretty_text_product(v, field_name: str):
     s = str(v)
 
     # 改行マーカーを統一
@@ -423,6 +423,7 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
 
 
