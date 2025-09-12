@@ -241,8 +241,6 @@ def def pretty_text_product(v, field_name: str):
     s = re.sub(r"[ \t\u3000]{2,}", " ", s)
     return s.strip()
 
-
-
 def render_product_detail(kampo_name: str, product_name: str):
     pm = product_master
     pm = pm[(pm["略称"].astype(str)==kampo_name) & (pm["商品名"].astype(str)==product_name)]
@@ -425,6 +423,7 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
 
 
