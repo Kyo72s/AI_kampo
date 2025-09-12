@@ -206,36 +206,41 @@ def pretty_text_common(v):
     s=re.sub(r"[ \t\u3000]{2,}"," ",s)
     return s.strip() if s.strip() else "特になし"
 
-def pretty_text_product(v, field_name: str):
+def def pretty_text_product(v, field_name: str):
     s = str(v)
 
     # 改行マーカーを統一
     s = re.sub(r"(?:<br\s*/?>|\[\[BR\]\]|\\n|⏎|＜改行＞|<改行>)", "\n", s, flags=re.IGNORECASE)
 
     if field_name == "組成":
-        # ① 句点の直後は必ず改行
+        # 1) 句点の直後は必ず改行
         s = re.sub(r"。\s*", "。\n", s)
 
-        # ② 「日局」の直前は必ず改行（1行目の最初にあるケースも含め徹底）
-        #    いったん全ての「日局」を改行付きに置換 → 連続改行を詰める → 先頭の改行を除去
+        # 2) 1行目を含む全ての「日局」の直前に必ず改行を挿入
+        #    まずプレーンに全部改行付きにして → 連続改行は詰める → 先頭改行は除去
         s = s.replace("日局", "\n日局")
         s = re.sub(r"\n{2,}", "\n", s)
         s = s.lstrip("\n")
 
-        # ③ その他のキーワードの直前でも改行（保険）
+        # 3) 予備のキーワードでも改行（保険）
         for kw in [r"より製した", r"上記", r"本剤7\.5g中、\s*上記の", r"以上の"]:
             s = re.sub(rf"[ \t\u3000]*(?={kw})", "\n", s)
 
-        # ④ 「…3.0g」など g の直後でも改行（読みやすさ向上）
+        # 4) 「…3.0g」など 'g' の直後でも改行（読みやすさ向上）
         s = re.sub(r"(?<=g)[ \t\u3000]*", "\n", s)
 
-    else:
-        # 組成以外は句点で改行
-        s = re.sub(r"。[ \t\u3000]*", "。\n", s)
+        # ★ 5) 最後に、全ての改行(\n)を HTML の <br/> に変換（ブラウザ側で確実に改行）
+        s = s.replace("\n", "<br/>")
 
-    # 余計な連続スペースを整理
+    else:
+        # 組成以外は句点で改行 → <br/> に変換
+        s = re.sub(r"。[ \t\u3000]*", "。\n", s)
+        s = s.replace("\n", "<br/>")
+
+    # 余分な連続スペース整理
     s = re.sub(r"[ \t\u3000]{2,}", " ", s)
     return s.strip()
+
 
 
 def render_product_detail(kampo_name: str, product_name: str):
@@ -420,6 +425,7 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
 
 
