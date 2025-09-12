@@ -209,37 +209,58 @@ def pretty_text_common(v):
 def pretty_text_product(v, field_name: str):
     s = str(v)
 
-    # 改行マーカーを統一
+    # 改行マーカーを統一（\n に）
     s = re.sub(r"(?:<br\s*/?>|\[\[BR\]\]|\\n|⏎|＜改行＞|<改行>)", "\n", s, flags=re.IGNORECASE)
 
     if field_name == "組成":
-        # 1) 句点の直後は必ず改行
-        s = re.sub(r"。\s*", "。\n", s)
+        text = s
 
-        # 2) 1行目を含む全ての「日局」の直前に必ず改行を挿入
-        #    まずプレーンに全部改行付きにして → 連続改行は詰める → 先頭改行は除去
-        s = s.replace("日局", "\n日局")
-        s = re.sub(r"\n{2,}", "\n", s)
-        s = s.lstrip("\n")
+        # 1) 「最初の生薬」の出現位置を探す（’日局’ または 和名＋数値＋g）
+        ing_pat = re.compile(r"(日局|[一-龥ぁ-んァ-ンｦ-ﾟー]{1,12})\s*\d+(?:\.\d+)?g")
+        m = ing_pat.search(text)
+        if m:
+            intro, rest = text[:m.start()], text[m.start():]
+        else:
+            intro, rest = text, ""
 
-        # 3) 予備のキーワードでも改行（保険）
-        for kw in [r"より製した", r"上記", r"本剤7\.5g中、\s*上記の", r"以上の"]:
-            s = re.sub(rf"[ \t\u3000]*(?={kw})", "\n", s)
+        # 2) 冒頭説明：句点のみで改行。その他の改行は除去して1行に整える
+        intro = intro.replace("\n", " ")
+        intro = re.sub(r"。\s*", "。<br/>", intro)
 
-        # 4) 「…3.0g」など 'g' の直後でも改行（読みやすさ向上）
-        s = re.sub(r"(?<=g)[ \t\u3000]*", "\n", s)
+        # 3) 成分ブロック
+        rest = rest.replace("\n", " ")
 
-        # ★ 5) 最後に、全ての改行(\n)を HTML の <br/> に変換（ブラウザ側で確実に改行）
-        s = s.replace("\n", "<br/>")
+        # 3-1) 全ての「日局」の直前に改行
+        rest = rest.replace("日局", "<br/>日局")
+
+        # 3-2) 「日局なし生薬」でも改行（エキス/粉末は除外）
+        #     直前数文字に「エキス」「粉末」がない場合のみ改行を入れる
+        #     例:  … シンキク2.0g → <br/>シンキク2.0g
+        rest = re.sub(
+            r"(?<!エキス)(?<!粉末)\s([一-龥ぁ-んァ-ンｦ-ﾟー]{1,12})\s*([0-9]+(?:\.[0-9]+)?g)",
+            r"<br/>\1\2",
+            rest
+        )
+
+        # 3-3) 連続 <br/> を 1 つに
+        rest = re.sub(r"(?:<br/>\s*){2,}", "<br/>", rest).lstrip("<br/>")
+
+        # 4) 結合
+        out = (intro + rest).strip()
+
+        # 5) 余分な空白整理
+        out = re.sub(r"[ \t\u3000]{2,}", " ", out)
+
+        return out
 
     else:
-        # 組成以外は句点で改行 → <br/> に変換
+        # 組成以外は従来通り：句点で改行 → <br/> へ
         s = re.sub(r"。[ \t\u3000]*", "。\n", s)
         s = s.replace("\n", "<br/>")
+        s = re.sub(r"[ \t\u3000]{2,}", " ", s)
+        return s.strip()
 
-    # 余分な連続スペース整理
-    s = re.sub(r"[ \t\u3000]{2,}", " ", s)
-    return s.strip()
+
 
 def render_product_detail(kampo_name: str, product_name: str):
     pm = product_master
@@ -423,6 +444,7 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
 
 
