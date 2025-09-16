@@ -209,56 +209,54 @@ def pretty_text_common(v):
 def pretty_text_product(v, field_name: str):
     s = str(v)
 
-    # 改行マーカーを統一（\n に）
+    # 各種改行マーカーを \n に統一
     s = re.sub(r"(?:<br\s*/?>|\[\[BR\]\]|\\n|⏎|＜改行＞|<改行>)", "\n", s, flags=re.IGNORECASE)
 
-    if field_name == "組成":
-        text = s
+    # 句点で <br/> 改行にするヘルパ（説明文用）
+    def br_by_period(txt: str) -> str:
+        txt = txt.replace("\n", " ")
+        txt = re.sub(r"。[ \t\u3000]*", "。<br/>", txt)
+        txt = re.sub(r"[ \t\u3000]{2,}", " ", txt)
+        return txt.strip()
 
-        # 1) 「最初の生薬」の出現位置を探す（’日局’ または 和名＋数値＋g）
-        ing_pat = re.compile(r"(日局|[一-龥ぁ-んァ-ンｦ-ﾟー]{1,12})\s*\d+(?:\.\d+)?g")
-        m = ing_pat.search(text)
-        if m:
-            intro, rest = text[:m.start()], text[m.start():]
-        else:
-            intro, rest = text, ""
+    if field_name != "組成":
+        # 組成以外は従来の句点改行
+        return br_by_period(s)
 
-        # 2) 冒頭説明：句点のみで改行。その他の改行は除去して1行に整える
-        intro = intro.replace("\n", " ")
-        intro = re.sub(r"。\s*", "。<br/>", intro)
+    # ---------- ここから「組成」専用ロジック ----------
+    text = s.replace("\n", " ")  # まず1行化（後で整形）
 
-        # 3) 成分ブロック
-        rest = rest.replace("\n", " ")
+    # 成分行（和名or日局 + 数値 + g）を検出する正規表現
+    # 例）日局ケイヒ4.0g / シンキク2.0g / 日局ハンゲ3g
+    ing_pat = re.compile(r"(?:日局)?[一-龥ぁ-んァ-ンｦ-ﾟー]{1,20}\s*\d[\d,]*(?:\.\d+)?g")
 
-        # 3-1) 全ての「日局」の直前に改行
-        rest = rest.replace("日局", "<br/>日局")
+    matches = list(ing_pat.finditer(text))
+    if not matches:
+        # 成分の塊が検出できないときは、句点改行だけして返す
+        return br_by_period(text)
 
-        # 3-2) 「日局なし生薬」でも改行（エキス/粉末は除外）
-        #     直前数文字に「エキス」「粉末」がない場合のみ改行を入れる
-        #     例:  … シンキク2.0g → <br/>シンキク2.0g
-        rest = re.sub(
-            r"(?<!エキス)(?<!粉末)\s([一-龥ぁ-んァ-ンｦ-ﾟー]{1,12})\s*([0-9]+(?:\.[0-9]+)?g)",
-            r"<br/>\1\2",
-            rest
-        )
+    # 冒頭説明・成分ブロック・末尾説明に分割
+    first, last = matches[0].start(), matches[-1].end()
+    intro = text[:first]
+    body  = text[first:last]
+    tail  = text[last:]
 
-        # 3-3) 連続 <br/> を 1 つに
-        rest = re.sub(r"(?:<br/>\s*){2,}", "<br/>", rest).lstrip("<br/>")
+    # 1) 冒頭説明は句点のみで改行
+    out_intro = br_by_period(intro) if intro.strip() else ""
 
-        # 4) 結合
-        out = (intro + rest).strip()
+    # 2) 成分ブロック：すべての成分を「1行1成分」にする
+    #    いったん body を残しつつ、成分の文字列だけ順に抜き出して並べる
+    ing_lines = [m.group(0).strip() for m in ing_pat.finditer(body)]
+    out_body = "<br/>".join(ing_lines)
 
-        # 5) 余分な空白整理
-        out = re.sub(r"[ \t\u3000]{2,}", " ", out)
+    # 3) 末尾説明（「上記の混合生薬より…」「…を含有する。」など）は句点で改行
+    out_tail = br_by_period(tail) if tail.strip() else ""
 
-        return out
-
-    else:
-        # 組成以外は従来通り：句点で改行 → <br/> へ
-        s = re.sub(r"。[ \t\u3000]*", "。\n", s)
-        s = s.replace("\n", "<br/>")
-        s = re.sub(r"[ \t\u3000]{2,}", " ", s)
-        return s.strip()
+    # 4) 連結（不要な連続 <br/> は詰める）
+    pieces = [x for x in [out_intro, out_body, out_tail] if x]
+    out = "<br/>".join(pieces)
+    out = re.sub(r"(?:<br/>\s*){2,}", "<br/>", out).strip()
+    return out
 
 
 
@@ -444,6 +442,7 @@ with center:
 
     if st.session_state.get("selected_kampo"):
         render_kampo_detail(st.session_state["selected_kampo"])
+
 
 
 
